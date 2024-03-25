@@ -85,6 +85,8 @@ def _tag8_8svb(data: Iterator[int], ctx: Optional[Context] = None) -> DecodedVal
 @map_to(7, decoder_map)
 def _tag2_3s32(data: Iterator[int], ctx: Optional[Context] = None) -> DecodedValue:
     lead = next(data)
+    if lead is None:
+        return 0, 0, 0
     shifted = lead >> 6
     if shifted == 0:  # 2bit fields
         v1 = sign_extend_2bit((lead >> 4) & 0x03)
@@ -148,6 +150,8 @@ def _tag8_4s16_v1(_: Iterator[int], __: Optional[Context] = None) -> DecodedValu
 def _tag8_4s16_v2(data: Iterator[int], ctx: Optional[Context] = None) -> DecodedValue:
     selector = next(data)
     values = ()
+    if selector is None:
+        return None
     nibble_index = 0
     buffer = 0
     for _ in range(4):

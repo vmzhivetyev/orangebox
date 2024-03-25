@@ -132,6 +132,12 @@ class Parser:
             # decode INTRA, INTER, SLOW, GPS or GPS_HOME frame
             frame = self._parse_frame(field_defs[ftype], reader)
 
+            if frame is None:
+                _log.debug("Dropping {:s} Frame #{:d} because it's corrupt"
+                           .format(ftype.value, ctx.read_frame_count + 1))
+                ctx.invalid_frame_count += 1
+                continue
+
             # store these frames to append them to subsequent frames:
             if ftype == FrameType.SLOW:
                 last_slow = frame
@@ -207,6 +213,9 @@ class Parser:
             fdef = fdefs[ctx.field_index]
             # decode current field value
             rawvalue = fdef.decoderfun(reader, ctx)
+            if rawvalue is None:
+                return None
+
             # apply predictions
             if isinstance(rawvalue, tuple):
                 value = ()
