@@ -95,6 +95,9 @@ class Parser:
         last_frame_pos = 0
         last_frame_is_corrupt = False
         for byte in reader:
+            if byte is None:
+                return
+
             try:
                 ftype = FrameType(chr(byte))
             except ValueError:
@@ -183,7 +186,7 @@ class Parser:
             frame = Frame(ftype, frame.data + tuple(extra_data))
 
             try:
-                FrameType(chr(reader.value()))
+                FrameType(chr(reader.value() or 0))
             except ValueError:
                 _log.debug("Dropping {:s} Frame #{:d} because it's corrupt"
                            .format(ftype.value, ctx.read_frame_count + 1))

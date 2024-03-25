@@ -37,6 +37,11 @@ def _unsigned_vb(data: Iterator[int], ctx: Optional[Context] = None) -> DecodedV
     shift, result = 0, 0
     for i in range(5):
         byte = next(data)
+
+        # EOF
+        if byte is None:
+            return 0
+
         result = result | ((byte & ~0x80) << shift)
         if byte < 128:
             # reached final byte

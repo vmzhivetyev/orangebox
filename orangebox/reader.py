@@ -206,9 +206,11 @@ class Reader:
         """
         return dict(self._field_defs)
 
-    def value(self) -> int:
+    def value(self) -> Optional[int]:
         """Get current byte value.
         """
+        if self._frame_data_len == self._frame_data_ptr:
+            return None
         return self._frame_data[self._frame_data_ptr]
 
     def has_subsequent(self, data: bytes) -> bool:
