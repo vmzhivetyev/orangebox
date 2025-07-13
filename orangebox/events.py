@@ -13,7 +13,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
+import logging
 from typing import Dict, Optional
 
 from .decoders import _unsigned_vb
@@ -63,6 +63,12 @@ def gtune_cycle_result(_: Reader) -> Optional[dict]:
     pass
 
 
+@map_to(EventType.CUSTOM, event_map)
+def custom(_: Reader) -> Optional[dict]:
+    # TODO
+    pass
+
+
 @map_to(EventType.CUSTOM_BLANK, event_map)
 def custom_blank(_: Reader) -> Optional[dict]:
     # TODO
@@ -90,5 +96,5 @@ def logging_resume(_: Reader) -> Optional[dict]:
 @map_to(EventType.LOG_END, event_map)
 def logging_end(data: Reader) -> Optional[dict]:
     if not data.has_subsequent(END_OF_LOG_MESSAGE):
-        raise ValueError("Invalid 'End of log' message")
+        logging.error("Invalid 'End of log' message")
     return None
