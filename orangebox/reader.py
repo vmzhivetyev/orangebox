@@ -49,14 +49,66 @@ class Reader:
         self._log_pointers = []  # type: List[int]
         self._frame_data = b''
         self._frame_data_len = 0
+        self._top_comments = []
         with open(path, "rb") as f:
             if not f.seekable():
                 msg = "Input file must be seekable"
                 _log.critical(msg)
                 raise IOError(msg)
+            self._parse_comments(f)
             self._find_pointers(f)
         if log_index is not None:
             self.set_log_index(log_index)
+
+    def _parse_comments(self, f):
+        """
+        parse first lines of the file that begin with '#' into self._top_comments
+        after execution file pointer stays at the first char of line coming after
+        the last comment line or at the very first char of the file if file doesn't have comments.
+        Comments can not be separated with non-comment data.
+        """
+        # Remember the starting position
+        start_pos = f.tell()
+
+        # Clear any existing comments
+        self._top_comments = []
+
+        while True:
+            # Remember current position in case we need to backtrack
+            current_pos = f.tell()
+
+            # Read one line
+            line = f.readline()
+
+            # If we reached end of file, go back to start of this iteration
+            if not line:
+                f.seek(current_pos)
+                break
+
+            # Decode the line if it's bytes (for binary mode)
+            if isinstance(line, bytes):
+                try:
+                    line_str = line.decode('ascii').rstrip('\r\n')
+                except UnicodeDecodeError:
+                    # If we can't decode, this might not be a text comment
+                    f.seek(current_pos)
+                    break
+            else:
+                line_str = line.rstrip('\r\n')
+
+            # Check if line starts with '#'
+            if line_str.startswith('#'):
+                # Add comment to list (without the '#' prefix)
+                self._top_comments.append(line_str[1:].lstrip())
+            else:
+                # This line doesn't start with '#', so we're done with comments
+                # Go back to the beginning of this line
+                f.seek(current_pos)
+                break
+
+        # If no comments were found, make sure we're back at the start
+        if not self._top_comments:
+            f.seek(start_pos)
 
     def set_log_index(self, index: int):
         """Set the current log index and read its corresponding frame data as raw bytes, plus parse the raw headers of
@@ -65,8 +117,8 @@ class Reader:
         :param index: The selected log index
         :raise RuntimeError: If ``index`` is smaller than 1 or greater than `.log_count`
         """
-        if index == self._log_index:
-            return
+        # if index == self._log_index:
+        #     return
         if index < 1 or self.log_count < index:
             raise RuntimeError("Invalid log_index: {:d} (1 <= x < {:d})".format(index, self.log_count))
         start = self._log_pointers[index - 1]
@@ -115,13 +167,15 @@ class Reader:
     def _find_pointers(self, f: BinaryIO):
         start = f.tell()
         first_line = f.readline()
+        assert first_line.startswith("H Product:".encode('ascii')), "Unexpected log start line"
         f.seek(start)
         content = f.read()
         new_index = content.find(first_line)
         step = len(first_line)
         while -1 < new_index:
-            self._log_pointers.append(new_index)
+            self._log_pointers.append(start + new_index)
             new_index = content.find(first_line, new_index + step + 1)
+        _log.info(f"Found log starts: {self._log_pointers}")
 
     def _build_field_defs(self):
         """Use the read headers to populate the `field_defs` property.
