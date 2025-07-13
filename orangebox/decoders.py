@@ -76,8 +76,11 @@ def _tag8_8svb(data: Iterator[int], ctx: Optional[Context] = None) -> DecodedVal
         header = next(data)
         values = ()
         for _ in range(group_count):
-            values += (_signed_vb(data, ctx) if header & 0x01 else 0,)
-            header >>= 1
+            if header:
+                values += (_signed_vb(data, ctx) if header & 0x01 else 0,)
+                header >>= 1
+            else:
+                values += (0,)
         return values
 
 
