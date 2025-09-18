@@ -111,12 +111,16 @@ Decoder = Callable[[Iterator[int], Optional["Context"]], DecodedValue]
 Predictor = Callable[[int, "Context"], int]
 FieldDefs = Dict[FrameType, List[FieldDef]]
 
-Event = namedtuple('Event', 'type data')
+Event = namedtuple('Event', 'type data last_time last_iter')
 """
 :param type: Type of event
 :type type: EventType
 :param data: Arbitrary data for the event
 :type data: dict
+:param last_time: Last timestamp
+:type last_time: int or float
+:param last_iter: Last iteration number
+:type last_iter: int
 """
 
 EventParser = Callable[[Iterator[int]], Optional[dict]]

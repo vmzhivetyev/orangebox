@@ -137,7 +137,7 @@ class Parser:
 
             if ftype == FrameType.EVENT:
                 # Parse event frame (event frames do not depend on field defs)
-                if not self._parse_event_frame(reader):
+                if not self._parse_event_frame(reader, last_time, last_iter):
                     ctx.invalid_frame_count += 1
                 ctx.read_frame_count += 1
                 if self._end_of_log:
@@ -285,7 +285,7 @@ class Parser:
         """Legacy frame parsing method - kept for compatibility"""
         return self._parse_frame_optimized(fdefs, reader)
 
-    def _parse_event_frame(self, reader: Reader) -> bool:
+    def _parse_event_frame(self, reader: Reader, last_time: int, last_iter: int) -> bool:
         byte = next(reader)
         try:
             event_type = EventType(byte)
@@ -295,7 +295,7 @@ class Parser:
         _log.debug("New event frame #{:d}: {:s}".format(self._ctx.read_frame_count + 1, event_type.name))
         parser = event_map[event_type]  # type: EventParser
         event_data = parser(reader)
-        self.events.append(Event(event_type, event_data))
+        self._events.append(Event(event_type, event_data, last_time, last_iter))
         if event_type == EventType.LOG_END:
             self._end_of_log = True
         return True

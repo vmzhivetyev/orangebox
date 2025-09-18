@@ -81,10 +81,115 @@ def twitch_test(_: Reader) -> Optional[dict]:
     pass
 
 
+INFLIGHT_ADJUSTMENT_FUNCTIONS = [
+    {"name": "None"},
+    {"name": "RC Rate", "scale": 0.01},
+    {"name": "RC Expo", "scale": 0.01},
+    {"name": "Throttle Expo", "scale": 0.01},
+    {"name": "Pitch & Roll Rate", "scale": 0.01},
+    {"name": "Yaw rate", "scale": 0.01},
+    {"name": "Pitch & Roll P", "scale": 0.1, "scalef": 1},
+    {"name": "Pitch & Roll I", "scale": 0.001, "scalef": 0.1},
+    {"name": "Pitch & Roll D", "scalef": 1000},
+    {"name": "Yaw P", "scale": 0.1, "scalef": 1},
+    {"name": "Yaw I", "scale": 0.001, "scalef": 0.1},
+    {"name": "Yaw D", "scalef": 1000},
+    {"name": "Rate Profile"},
+    {"name": "Pitch Rate", "scale": 0.01},
+    {"name": "Roll Rate", "scale": 0.01},
+    {"name": "Pitch P", "scale": 0.1, "scalef": 1},
+    {"name": "Pitch I", "scale": 0.001, "scalef": 0.1},
+    {"name": "Pitch D", "scalef": 1000},
+    {"name": "Roll P", "scale": 0.1, "scalef": 1},
+    {"name": "Roll I", "scale": 0.001, "scalef": 0.1},
+    {"name": "Roll D", "scalef": 1000},
+]
+
+
+def uint32ToFloat(value: int) -> float:
+    """Convert a 32-bit unsigned integer to IEEE 754 float representation"""
+    return struct.unpack('>f', struct.pack('>I', value))[0]
+
+
+def read_signed_vb(reader) -> int:
+    """Read a signed variable-length byte sequence"""
+    value = 0
+    shift = 0
+
+    while True:
+        byte = next(reader)
+        value |= (byte & 0x7F) << shift
+        if (byte & 0x80) == 0:
+            break
+        shift += 7
+
+    # Handle sign extension for negative values
+    if value & (1 << (shift + 6)):  # Check if sign bit is set
+        value |= -(1 << (shift + 7))  # Sign extend
+
+    return value
+
+
+def read_u32(reader) -> int:
+    """Read a 32-bit unsigned integer (big-endian)"""
+    b1 = next(reader)
+    b2 = next(reader)
+    b3 = next(reader)
+    b4 = next(reader)
+    return (b1 << 24) | (b2 << 16) | (b3 << 8) | b4
+
+
 @map_to(EventType.INFLIGHT_ADJUSTMENT, event_map)
-def inflight_adjustment(_: Reader) -> Optional[dict]:
-    # TODO
-    pass
+def inflight_adjustment(reader: Reader) -> Optional[dict]:
+    """
+    Parse inflight adjustment event data.
+    
+    The first byte contains:
+    - Lower 7 bits: function index
+    - 8th bit: data type flag (0=integer, 1=float)
+    """
+    # Read the first byte which contains both function index and data type flag
+    tmp = next(reader)
+    
+    # Extract function index from lower 7 bits
+    func = tmp & 127
+    
+    # Read value based on the 8th bit flag
+    if tmp < 128:
+        # Integer data - read signed variable-length byte
+        value = read_signed_vb(reader)
+    else:
+        # Float data - read 32-bit unsigned integer and convert to float
+        value = uint32ToFloat(read_u32(reader))
+    
+    # Initialize result with default values
+    result = {
+        "name": "Unknown",
+        "func": func,
+        "value": value
+    }
+    
+    # Look up function description if available
+    if func < len(INFLIGHT_ADJUSTMENT_FUNCTIONS):
+        descr = INFLIGHT_ADJUSTMENT_FUNCTIONS[func]
+        result["name"] = descr["name"]
+        
+        # Apply scaling
+        scale = 1
+        
+        # Use base scale if available
+        if "scale" in descr:
+            scale = descr["scale"]
+        
+        # Use different scale for float data if available
+        if tmp >= 128 and "scalef" in descr:
+            scale = descr["scalef"]
+        
+        # Apply scaling and round to 4 decimal places
+        # This matches the JavaScript: Math.round(value * scale * 10000) / 10000
+        result["value"] = round(value * scale, 4)
+    
+    return result
 
 
 @map_to(EventType.LOGGING_RESUME, event_map)
