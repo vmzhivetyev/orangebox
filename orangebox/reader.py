@@ -23,34 +23,43 @@ from .tools import _trycast
 from .types import FieldDef, FrameType, Headers
 
 MAX_FRAME_SIZE = 256
+# Increased buffer size for better I/O performance
+DEFAULT_BUFFER_SIZE = 2 * 1024 * 1024  # 2MB buffer
 
 _log = logging.getLogger(__name__)
 
 
 class Reader:
-    """Implements a file-like object for reading a flight log and store the raw data in a structured way. Does not do
-    any real parsing, the iterator just yields bytes.
-
-    .. todo:: Detecting and informing the user about possible file corruption (missing headers, etc.)
+    """Optimized file-like object for reading a flight log and store the raw data in a structured way.
+    Includes performance optimizations for faster parsing.
     """
+    __slots__ = [
+        '_headers', '_field_defs', '_log_index', '_header_size', '_path',
+        '_frame_data_ptr', '_log_pointers', '_frame_data', '_frame_data_len',
+        '_top_comments', '_frame_data_view', '_buffer_size'
+    ]
 
-    def __init__(self, path: str, log_index: Optional[int] = None):
+    def __init__(self, path: str, log_index: Optional[int] = None, buffer_size: int = DEFAULT_BUFFER_SIZE):
         """
         :param path: Path to a log file
         :param log_index: Session index within log file. If set to `None` (the default) there will be no session selected and headers and frame data won't be read until the first call to `.set_log_index()`.
+        :param buffer_size: Buffer size for file I/O operations
         """
         self._headers = {}  # type: Headers
         self._field_defs = {}  # type: Dict[FrameType, List[FieldDef]]
         self._log_index = 0
         self._header_size = 0
         self._path = path
+        self._buffer_size = buffer_size
         _log.info("Processing: " + path)
         self._frame_data_ptr = 0
         self._log_pointers = []  # type: List[int]
         self._frame_data = b''
         self._frame_data_len = 0
+        self._frame_data_view = None  # type: Optional[memoryview]
         self._top_comments = []
-        with open(path, "rb") as f:
+
+        with open(path, "rb", buffering=self._buffer_size) as f:
             if not f.seekable():
                 msg = "Input file must be seekable"
                 _log.critical(msg)
@@ -112,25 +121,42 @@ class Reader:
 
     def set_log_index(self, index: int):
         """Set the current log index and read its corresponding frame data as raw bytes, plus parse the raw headers of
-        the selected log.
+        the selected log. Optimized for better memory usage and I/O performance.
 
         :param index: The selected log index
         :raise RuntimeError: If ``index`` is smaller than 1 or greater than `.log_count`
         """
-        # if index == self._log_index:
-        #     return
         if index < 1 or self.log_count < index:
             raise RuntimeError("Invalid log_index: {:d} (1 <= x < {:d})".format(index, self.log_count))
+
         start = self._log_pointers[index - 1]
-        with open(self._path, "rb") as f:
+
+        with open(self._path, "rb", buffering=self._buffer_size) as f:
             f.seek(start)
             self._update_headers(f)
             f.seek(start + self._header_size)
+
+            # Calculate data size
             size = self._log_pointers[index] - start - self._header_size if index < self.log_count else None
-            self._frame_data = f.read(size) if size is not None else f.read()
+
+            if size is not None:
+                # Read all data at once for better performance
+                self._frame_data = f.read(size)
+            else:
+                # Read remaining file in optimized chunks
+                chunks = []
+                while True:
+                    chunk = f.read(self._buffer_size)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                self._frame_data = b''.join(chunks)
+
         self._log_index = index
         self._frame_data_ptr = 0
         self._frame_data_len = len(self._frame_data)
+        # Create memoryview for faster byte access
+        self._frame_data_view = memoryview(self._frame_data)
         self._build_field_defs()
         _log.info("Log #{:d} out of {:d} (start: 0x{:X}, size: {:d})"
                   .format(self._log_index, self.log_count, start, self._frame_data_len))
@@ -219,6 +245,41 @@ class Reader:
         # copy field names from INTRA to INTER defs
         for i, fdef in enumerate(field_defs[FrameType.INTER]):
             fdef.name = field_defs[FrameType.INTRA][i].name
+
+    # Optimized data access methods
+    def read_batch(self, size: int) -> Optional[memoryview]:
+        """Read a batch of bytes efficiently using memoryview"""
+        if self._frame_data_ptr + size > self._frame_data_len:
+            remaining = self._frame_data_len - self._frame_data_ptr
+            if remaining <= 0:
+                return None
+            size = remaining
+
+        batch = self._frame_data_view[self._frame_data_ptr:self._frame_data_ptr + size]
+        self._frame_data_ptr += size
+        return batch
+
+    def read_bytes(self, count: int) -> Optional[bytes]:
+        """Read multiple bytes efficiently"""
+        if self._frame_data_ptr + count > self._frame_data_len:
+            return None
+
+        result = self._frame_data[self._frame_data_ptr:self._frame_data_ptr + count]
+        self._frame_data_ptr += count
+        return result
+
+    def peek_byte(self) -> Optional[int]:
+        """Peek at the next byte without advancing pointer"""
+        if self._frame_data_ptr >= self._frame_data_len:
+            return None
+        return self._frame_data[self._frame_data_ptr]
+
+    def skip_bytes(self, count: int) -> bool:
+        """Skip bytes efficiently"""
+        if self._frame_data_ptr + count > self._frame_data_len:
+            return False
+        self._frame_data_ptr += count
+        return True
 
     @property
     def log_index(self) -> int:
